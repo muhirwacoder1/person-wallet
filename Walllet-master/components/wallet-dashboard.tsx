@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Transaction, CategoryLimit } from '@/types/transaction'
 import { UserProfile } from '@/types/user'
 import { TransactionCard } from './transaction-card'
@@ -29,76 +29,144 @@ import { startOfDay, endOfDay, isWithinInterval } from 'date-fns'
 import { useToast } from '@/hooks/use-toast'
 import { expenseCategories } from '@/utils/categories'
 import { Progress } from '@/components/ui/progress'
-
-// Sample data
-const sampleTransactions: Transaction[] = [
-  {
-    id: '1',
-    amount: 2500,
-    type: 'income',
-    category: 'salary',
-    description: 'Monthly Salary',
-    date: new Date('2024-01-15'),
-    paymentMethod: 'bank',
-  },
-  {
-    id: '2',
-    amount: 45.99,
-    type: 'expense',
-    category: 'food',
-    description: 'Grocery Shopping',
-    date: new Date('2024-01-16'),
-    paymentMethod: 'mobile',
-    location: 'Whole Foods Market',
-  },
-]
-
-const sampleCategoryLimits: CategoryLimit[] = [
-  {
-    category: 'food',
-    limit: 500,
-    spent: 450,
-  },
-  {
-    category: 'entertainment',
-    limit: 200,
-    spent: 150,
-  },
-  {
-    category: 'shopping',
-    limit: 300,
-    spent: 280,
-  },
-]
-
-const chartLabels = ['Jan 10', 'Jan 11', 'Jan 12', 'Jan 13', 'Jan 14', 'Jan 15', 'Jan 16']
-const incomeData = [0, 0, 0, 0, 0, 2500, 0]
-const expenseData = [100, 150, 200, 180, 120, 250, 45.99]
+import { storage } from '@/lib/storage'
 
 const sampleUserProfile: UserProfile = {
   name: 'John Doe',
   email: 'john.doe@example.com',
-  photoUrl: '/avatar.png', // Move this to public folder
+  photoUrl: '/avatar.png',
 }
 
 const WalletDashboard = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>(sampleTransactions)
-  const [categoryLimits] = useState<CategoryLimit[]>(sampleCategoryLimits)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [balance, setBalance] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const [userProfile] = useState<UserProfile>(sampleUserProfile)
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week')
   const [reportStartDate, setReportStartDate] = useState<Date>()
   const [reportEndDate, setReportEndDate] = useState<Date>()
-  const [budgets, setBudgets] = useState<CategoryLimit[]>(sampleCategoryLimits)
-  const [newBudget, setNewBudget] = useState<CategoryLimit>({
-    category: '',
-    limit: 0,
-    spent: 0
-  })
+  const [budgets, setBudgets] = useState<CategoryLimit[]>([])
+  const [newBudget, setNewBudget] = useState({ category: '', limit: 0 })
   const { toast } = useToast()
 
-  const totalBalance = transactions.reduce((acc, curr) => {
-    return curr.type === 'income' ? acc + curr.amount : acc - curr.amount
-  }, 0)
+  // Refresh data function
+  const refreshData = () => {
+    try {
+      // Get current balance
+      const currentBalance = storage.balance.get()
+      setBalance(currentBalance)
+
+      // Get transactions
+      const allTransactions = storage.transactions.getAll()
+      setTransactions(allTransactions)
+
+      // Get budget tracking data
+      const budgetData = storage.budgets.getAll()
+      const trackingData = storage.budgets.getBudgetTracking()
+      
+      setBudgets(budgetData.map(b => ({
+        category: b.category,
+        limit: b.budget_limit,
+        spent: trackingData.find(t => t.category === b.category)?.spent || 0
+      })))
+    } catch (error) {
+      console.error('Error refreshing data:', error)
+      toast({
+        title: "Error refreshing data",
+        description: "Please try again",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Load initial data
+  useEffect(() => {
+    refreshData()
+    setLoading(false)
+  }, [])
+
+  const handleAddTransaction = async (newTransaction: Omit<Transaction, 'id'>) => {
+    try {
+      console.log('Adding transaction:', newTransaction)
+      
+      // Add the transaction
+      const transaction = storage.transactions.add(newTransaction)
+      console.log('Transaction added:', transaction)
+
+      // Refresh all data
+      refreshData()
+
+      toast({
+        title: `${newTransaction.type === 'income' ? 'Income' : 'Expense'} Added`,
+        description: `${formatCurrency(newTransaction.amount)} has been ${newTransaction.type === 'income' ? 'added to' : 'deducted from'} your balance`,
+      })
+    } catch (error) {
+      console.error('Error details:', error)
+      toast({
+        title: "Error adding transaction",
+        description: "Please try again",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleAddBudget = () => {
+    if (!newBudget.category || newBudget.limit <= 0) {
+      toast({
+        title: "Invalid Budget",
+        description: "Please select a category and enter a valid limit",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      storage.budgets.add({
+        category: newBudget.category,
+        budget_limit: newBudget.limit,
+        period: 'monthly'
+      })
+
+      // Refresh budgets data
+      refreshData()
+      
+      // Reset form
+      setNewBudget({ category: '', limit: 0 })
+      
+      toast({
+        title: "Budget Added",
+        description: `New budget created for ${newBudget.category}`,
+      })
+    } catch (error) {
+      console.error('Error adding budget:', error)
+      toast({
+        title: "Error adding budget",
+        description: "Please try again",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteBudget = (category: string) => {
+    try {
+      storage.budgets.delete(category)
+      refreshData()
+      
+      toast({
+        title: "Budget Deleted",
+        description: `Budget for ${category} has been removed`,
+      })
+    } catch (error) {
+      console.error('Error deleting budget:', error)
+      toast({
+        title: "Error deleting budget",
+        description: "Please try again",
+        variant: "destructive",
+      })
+    }
+  }
 
   const totalIncome = transactions
     .filter(t => t.type === 'income')
@@ -107,72 +175,6 @@ const WalletDashboard = () => {
   const totalExpenses = transactions
     .filter(t => t.type === 'expense')
     .reduce((acc, curr) => acc + curr.amount, 0)
-
-  const handleAddBudget = () => {
-    if (!newBudget.category || newBudget.limit <= 0) {
-      toast({
-        title: "Invalid Budget ❌",
-        description: "Please select a category and enter a valid limit",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (budgets.some(b => b.category === newBudget.category)) {
-      toast({
-        title: "Budget Exists ⚠️",
-        description: "A budget for this category already exists",
-        variant: "warning",
-      })
-      return
-    }
-
-    setBudgets(prev => [...prev, { ...newBudget, spent: 0 }])
-    setNewBudget({ category: '', limit: 0, spent: 0 })
-    toast({
-      title: "Budget Added ✨",
-      description: `New budget created for ${newBudget.category}`,
-    })
-  }
-
-  const handleDeleteBudget = (category: string) => {
-    setBudgets(prev => prev.filter(b => b.category !== category))
-    toast({
-      title: "Budget Deleted 🗑️",
-      description: `Budget for ${category} has been removed`,
-    })
-  }
-
-  const handleAddTransaction = (transaction: Transaction) => {
-    setTransactions([...transactions, transaction])
-    
-    if (transaction.type === 'expense') {
-      // Update budget spending
-      setBudgets(prev => prev.map(budget => {
-        if (budget.category === transaction.category) {
-          const newSpent = budget.spent + transaction.amount
-          const percentage = (newSpent / budget.limit) * 100
-          
-          if (percentage >= 100) {
-            toast({
-              title: "Budget Exceeded! 🚨",
-              description: `Your ${budget.category} spending has exceeded the budget limit of ${formatCurrency(budget.limit)}`,
-              variant: "destructive",
-            })
-          } else if (percentage >= 80) {
-            toast({
-              title: "Budget Warning! ⚠️",
-              description: `You've used ${percentage.toFixed(1)}% of your ${budget.category} budget`,
-              variant: "warning",
-            })
-          }
-          
-          return { ...budget, spent: newSpent }
-        }
-        return budget
-      }))
-    }
-  }
 
   const filteredTransactions = transactions.filter(transaction => {
     if (!reportStartDate || !reportEndDate) return true
@@ -224,11 +226,11 @@ const WalletDashboard = () => {
             <CardHeader>
               <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
                 <Wallet className="w-4 h-4 text-primary" />
-                Total Balance
+                Current Balance
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <span className="text-3xl font-bold tracking-tight">{formatCurrency(totalBalance)}</span>
+              <span className="text-3xl font-bold tracking-tight">{formatCurrency(balance)}</span>
             </CardContent>
           </Card>
           <Card className="bg-card hover:shadow-lg transition-all duration-200 border-border/50">
@@ -346,11 +348,27 @@ const WalletDashboard = () => {
           <TabsContent value="analysis">
             <div className="grid gap-6 md:grid-cols-2">
               <Card>
-                <CardHeader>
-                  <CardTitle>Spending Trends</CardTitle>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-base font-medium">Spending Trends</CardTitle>
+                  <Select
+                    value={timeframe}
+                    onValueChange={(value: 'week' | 'month' | 'year') => setTimeframe(value)}
+                  >
+                    <SelectTrigger className="w-[120px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="week">Week</SelectItem>
+                      <SelectItem value="month">Month</SelectItem>
+                      <SelectItem value="year">Year</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </CardHeader>
                 <CardContent>
-                  <SpendingChart transactions={transactions} timeframe={timeframe} />
+                  <SpendingChart 
+                    transactions={transactions}
+                    timeframe={timeframe}
+                  />
                 </CardContent>
               </Card>
 
@@ -383,7 +401,7 @@ const WalletDashboard = () => {
                     <div className="flex gap-4">
                       <Select
                         value={newBudget.category}
-                        onValueChange={(value) => setNewBudget({ ...newBudget, category: value })}
+                        onValueChange={(value) => setNewBudget(prev => ({ ...prev, category: value }))}
                       >
                         <SelectTrigger className="w-[250px] bg-background">
                           <SelectValue placeholder="Select category" />
@@ -404,7 +422,7 @@ const WalletDashboard = () => {
                       <input
                         type="number"
                         value={newBudget.limit}
-                        onChange={(e) => setNewBudget({ ...newBudget, limit: parseFloat(e.target.value) || 0 })}
+                        onChange={(e) => setNewBudget(prev => ({ ...prev, limit: parseFloat(e.target.value) || 0 }))}
                         className="flex h-10 w-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:ring-2 focus:ring-ring"
                         placeholder="Enter budget limit"
                       />
@@ -412,17 +430,8 @@ const WalletDashboard = () => {
                         onClick={handleAddBudget}
                         className="min-w-[120px] bg-primary hover:bg-primary/90"
                       >
-                        {budgets.some(b => b.category === newBudget.category) ? (
-                          <>
-                            <span className="text-lg mr-2">📝</span>
-                            Update
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-lg mr-2">➕</span>
-                            Add
-                          </>
-                        )}
+                        <span className="text-lg mr-2">➕</span>
+                        Add Budget
                       </Button>
                     </div>
                   </div>

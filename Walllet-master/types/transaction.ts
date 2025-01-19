@@ -1,21 +1,26 @@
-export type TransactionType = 'income' | 'expense'
-export type PaymentMethod = 'bank' | 'mobile'
-export type Category = 'food' | 'transport' | 'shopping' | 'entertainment' | 'bills' | 'salary' | 'other'
+export type Transaction = {
+  id: string;
+  amount: number;
+  type: 'income' | 'expense';
+  category: string;
+  description: string;
+  date: string;
+  payment_method: string;
+  location?: string;
+  created_at: string;
+};
 
-export interface Transaction {
-  id: string
-  amount: number
-  type: TransactionType
-  category: Category
-  description: string
-  date: Date
-  paymentMethod: PaymentMethod
-  location?: string
-}
+export type Budget = {
+  id: string;
+  category: string;
+  budget_limit: number;
+  period: 'monthly' | 'weekly' | 'yearly';
+  created_at: string;
+};
 
-export interface CategoryLimit {
-  category: Category
-  limit: number
-  spent: number
-}
+export type CategoryLimit = {
+  category: string;
+  limit: number;
+  spent: number;
+};
 
